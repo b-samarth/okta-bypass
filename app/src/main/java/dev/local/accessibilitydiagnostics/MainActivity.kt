@@ -14,6 +14,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Switch
 
 class MainActivity : Activity() {
     private lateinit var logView: TextView
@@ -49,6 +50,19 @@ class MainActivity : Activity() {
     }
 
     private fun buildUi() {
+        
+        val cycleSwitch = Switch(this).apply {
+        text = "Cycle Okta (Open/Close every 10s)"
+        isChecked = false
+        setOnCheckedChangeListener { _, isChecked ->
+            val intent = Intent(this@MainActivity, DiagnosticAccessibilityService::class.java).apply {
+                action = DiagnosticAccessibilityService.ACTION_TOGGLE_CYCLE
+                putExtra(DiagnosticAccessibilityService.EXTRA_CYCLE_ENABLED, isChecked)
+            }
+            startService(intent)
+        }
+    }
+        
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(16, 20, 16, 12)
@@ -58,6 +72,7 @@ class MainActivity : Activity() {
             textSize = 22f
         }
         root.addView(title)
+        root.addView(cycleSwitch)
         root.addView(TextView(this).apply {
             text = "Local, in-memory event and node log. Sensitive UI text may appear here."
             textSize = 13f

