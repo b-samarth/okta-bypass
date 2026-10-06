@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Accessibility Diagnostics</string>
+    <string name="service_description">Locally logs accessibility events, exposed node trees, and interactive windows for diagnostics.</string>
+</resources>
