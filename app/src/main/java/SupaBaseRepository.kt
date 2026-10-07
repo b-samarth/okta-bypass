@@ -13,6 +13,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import android.util.Log
 
 data class OktaAccountEntry(
     val client: String,
@@ -21,11 +22,12 @@ data class OktaAccountEntry(
     val secondsUntilCodeExpires: Int
 )
 
-object SheetRepository { // Keep object name SheetRepository if you don't want to rename call sites
+object SupaBaseRepository { // Keep object name SheetRepository if you don't want to rename call sites
 
     // Replace with your Project URL & Anon Public Key from Supabase Dashboard -> Project Settings -> API
     private const val SUPABASE_URL = "https://pxyzmatrcwqdzpsbdnbr.supabase.co"
-    private const val SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB4eXptYXRyY3dxZHpwc2JkbmJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzNzYyNTgsImV4cCI6MjEwNjk1MjI1OH0.IDTiprTsxQWd_ajlAy8H7s3-y1XjHVhHm5BVybe4Uw0"
+    private const val SUPABASE_ANON_KEY =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB4eXptYXRyY3dxZHpwc2JkbmJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzNzYyNTgsImV4cCI6MjEwNjk1MjI1OH0.IDTiprTsxQWd_ajlAy8H7s3-y1XjHVhHm5BVybe4Uw0"
 
     // PostgREST upsert endpoint: targets okta_tokens and merges on composite key (client, account)
     private const val UPSERT_ENDPOINT = "$SUPABASE_URL/rest/v1/okta_tokens?on_conflict=client,account"
@@ -67,6 +69,8 @@ object SheetRepository { // Keep object name SheetRepository if you don't want t
             jsonArray.put(obj)
         }
 
+        logLargePayload("OktaSync", jsonArray.toString())
+
         val request = Request.Builder()
             .url(UPSERT_ENDPOINT)
             .addHeader("apikey", SUPABASE_ANON_KEY)
@@ -89,6 +93,14 @@ object SheetRepository { // Keep object name SheetRepository if you don't want t
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private fun logLargePayload(tag: String, content: String) {
+        val maxLogSize = 3000
+        for (i in 0..content.length step maxLogSize) {
+            val end = (i + maxLogSize).coerceAtMost(content.length)
+            Log.d(tag, "Body [${i}..${end}]: ${content.substring(i, end)}")
         }
     }
 }

