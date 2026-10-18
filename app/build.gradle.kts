@@ -1,3 +1,13 @@
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        load(localPropertiesFile.inputStream())
+    }
+}
+
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,6 +23,27 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        val supabaseUrl = localProperties.getProperty("SUPABASE_URL") ?: ""
+        val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY") ?: ""
+        val upsertEndpoint = localProperties.getProperty("UPSERT_ENDPOINT") ?: ""
+        buildConfigField("String", "BASE_URL", supabaseUrl)
+        buildConfigField("String", "SUPABASE_ANON_KEY", supabaseAnonKey)
+        buildConfigField("String", "UPSERT_ENDPOINT", upsertEndpoint)
+    }
+
+    buildTypes {
+        release {
+            // Shrink, optimize, and obfuscate app code.
+            isMinifyEnabled = true
+
+            // Remove unused Android resources.
+            isShrinkResources = true
+
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
     }
 
     compileOptions {
@@ -22,7 +53,6 @@ android {
 
     packaging {
         resources {
-            // Essential: Prevents duplicate META-INF conflicts caused by Google API client libraries
             excludes += setOf(
                 "META-INF/DEPENDENCIES",
                 "META-INF/LICENSE",
@@ -40,22 +70,18 @@ android {
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        jvmTarget.set(
+            org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        )
     }
 }
 
 dependencies {
-    // -------------------------------------------------------------------------
-    // Option A: Dependencies for Google Apps Script Web App (RECOMMENDED)
-    // -------------------------------------------------------------------------
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
 
-    // -------------------------------------------------------------------------
-    // Option B: Dependencies for direct Google Sheets API v4 (OAuth2)
-    // (Uncomment these ONLY if you are using Google Cloud OAuth2 authentication)
-    // -------------------------------------------------------------------------
+    // Optional Google Sheets / OAuth dependencies:
     // implementation("com.google.android.gms:play-services-auth:21.2.0")
     // implementation("com.google.api-client:google-api-client-android:2.6.0")
     // implementation("com.google.apis:google-api-services-sheets:v4-rev20240416-2.0.0")

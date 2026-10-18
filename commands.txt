@@ -2,3 +2,14 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home PATH=/o
 adb install -r app/build/outputs/apk/debug/app-debug.apk && adb shell am start -n dev.local.accessibilitydiagnostics/.MainActivity
 adb logcat -s SheetRepository:V OktaCycle:V 
 adb logcat -s A11yDiagnostics:D
+
+#release build
+JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home PATH=/opt/homebrew/opt/openjdk@21/bin:$PATH ANDROID_HOME=/Users/samarth/Library/Android/sdk ANDROID_SDK_ROOT=/Users/samarth/Library/Android/sdk ./gradlew assembleRelease --stacktrace
+#release install
+adb install -r $HOME/release-apps/accessebility-service-signed.apk && adb shell am start -n dev.local.accessibilitydiagnostics/.MainActivity
+
+#sign apk
+$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \  --ks "$HOME/keystore/accessibilitydiagnostics-release.jks" \
+  --ks-key-alias accessibilitydiagnostics \
+  --out "$HOME/release-apps/accessebility-service-signed.apk" \
+  app/build/outputs/apk/release/app-release-unsigned.apk
