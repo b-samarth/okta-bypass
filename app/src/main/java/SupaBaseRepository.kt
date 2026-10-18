@@ -25,11 +25,11 @@ data class OktaAccountEntry(
 object SupaBaseRepository {
 
     // Replace with your Project URL & Anon Public Key from Supabase Dashboard -> Project Settings -> API
-    private const val SUPABASE_URL = BuildConfig.SUPABASE_URL
-    private const val SUPABASE_ANON_KEY = BuildConfig.SUPABASE_ANON_KEY
+    private val SUPABASE_URL = BuildConfig.SUPABASE_URL
+    private val SUPABASE_ANON_KEY = BuildConfig.SUPABASE_ANON_KEY
 
     // PostgREST upsert endpoint: targets okta_tokens and merges on composite key (client, account)
-    private const val UPSERT_ENDPOINT = "$SUPABASE_URL/${BuildConfig.UPSERT_ENDPOINT}"
+    private val UPSERT_ENDPOINT = "$SUPABASE_URL/${BuildConfig.UPSERT_ENDPOINT}"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)

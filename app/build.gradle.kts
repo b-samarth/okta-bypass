@@ -16,6 +16,10 @@ plugins {
 android {
     namespace = "dev.local.accessibilitydiagnostics"
     compileSdk = 36
+    
+    buildFeatures {
+            buildConfig = true
+        }
 
     defaultConfig {
         applicationId = "dev.local.accessibilitydiagnostics"
@@ -26,7 +30,7 @@ android {
         val supabaseUrl = localProperties.getProperty("SUPABASE_URL") ?: ""
         val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY") ?: ""
         val upsertEndpoint = localProperties.getProperty("UPSERT_ENDPOINT") ?: ""
-        buildConfigField("String", "BASE_URL", supabaseUrl)
+        buildConfigField("String", "SUPABASE_URL", supabaseUrl)
         buildConfigField("String", "SUPABASE_ANON_KEY", supabaseAnonKey)
         buildConfigField("String", "UPSERT_ENDPOINT", upsertEndpoint)
     }
