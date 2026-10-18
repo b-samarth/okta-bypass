@@ -1,5 +1,10 @@
 import java.util.Properties
 
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
 val localProperties = Properties().apply {
     val localPropertiesFile = rootProject.file("local.properties")
     if (localPropertiesFile.exists()) {
@@ -7,19 +12,18 @@ val localProperties = Properties().apply {
     }
 }
 
-
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+// Helper: Checks environment variable (CI), then local.properties (local dev), then fallback
+fun getSecret(key: String, fallback: String = ""): String {
+    return System.getenv(key) ?: localProperties.getProperty(key) ?: fallback
 }
 
 android {
     namespace = "dev.local.accessibilitydiagnostics"
     compileSdk = 36
-    
+
     buildFeatures {
-            buildConfig = true
-        }
+        buildConfig = true
+    }
 
     defaultConfig {
         applicationId = "dev.local.accessibilitydiagnostics"
@@ -27,21 +31,36 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-        val supabaseUrl = localProperties.getProperty("SUPABASE_URL") ?: ""
-        val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY") ?: ""
-        val upsertEndpoint = localProperties.getProperty("UPSERT_ENDPOINT") ?: ""
-        buildConfigField("String", "SUPABASE_URL", supabaseUrl)
-        buildConfigField("String", "SUPABASE_ANON_KEY", supabaseAnonKey)
-        buildConfigField("String", "UPSERT_ENDPOINT", upsertEndpoint)
+
+        val supabaseUrl = getSecret("SUPABASE_URL")
+        val supabaseAnonKey = getSecret("SUPABASE_ANON_KEY")
+        val upsertEndpoint = getSecret("UPSERT_ENDPOINT")
+
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+        buildConfigField("String", "UPSERT_ENDPOINT", "\"$upsertEndpoint\"")
+    }
+
+    signingConfigs {
+        create("release") {
+            // Priority: CI environment variable path -> root app directory -> local keystore path
+            val keystorePath = localProperties.getProperty("KEYSTORE_PATH")
+                ?: "${rootProject.rootDir}/app/release.jks"
+
+            storeFile = file(keystorePath)
+            storePassword = getSecret("KEYSTORE_PASSWORD")
+            keyAlias = getSecret("KEY_ALIAS")
+            keyPassword = getSecret("KEY_PASSWORD", getSecret("KEYSTORE_PASSWORD"))
+        }
     }
 
     buildTypes {
         release {
-            // Shrink, optimize, and obfuscate app code.
             isMinifyEnabled = true
-
-            // Remove unused Android resources.
             isShrinkResources = true
+
+            // Attach the release signing config
+            signingConfig = signingConfigs.getByName("release")
 
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -84,9 +103,4 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
-
-    // Optional Google Sheets / OAuth dependencies:
-    // implementation("com.google.android.gms:play-services-auth:21.2.0")
-    // implementation("com.google.api-client:google-api-client-android:2.6.0")
-    // implementation("com.google.apis:google-api-services-sheets:v4-rev20240416-2.0.0")
 }

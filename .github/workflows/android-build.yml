@@ -5,11 +5,11 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Build Debug APK
+    name: Build & Sign APK
     runs-on: ubuntu-latest
 
     steps:
@@ -26,10 +26,16 @@ jobs:
       - name: Make Gradle Wrapper Executable
         run: chmod +x gradlew
 
+      - name: Decode Release Keystore
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > app/release.jks
+
       - name: Run Kotlin Compilation & Unit Tests
         run: ./gradlew testDebugUnitTest compileDebugKotlin
 
       - name: Build Release APK
+        if: github.event_name != 'pull_request'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
@@ -37,11 +43,13 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_PATH: "app/release.jks"
         run: ./gradlew assembleRelease
 
       - name: Upload Release APK
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: app-release
           path: app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: warn
+          if-no-files-found: error
