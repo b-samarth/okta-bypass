@@ -42,7 +42,6 @@ jobs:
           UPSERT_ENDPOINT: ${{ secrets.UPSERT_ENDPOINT }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEYSTORE_PATH: "app/release.jks"
         run: ./gradlew assembleRelease
 

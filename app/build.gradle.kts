@@ -35,10 +35,16 @@ android {
         val supabaseUrl = getSecret("SUPABASE_URL")
         val supabaseAnonKey = getSecret("SUPABASE_ANON_KEY")
         val upsertEndpoint = getSecret("UPSERT_ENDPOINT")
+        val licenseKey = getSecret("DISTRIBUTION_LICENSE")
+        val licenseServerUrl = getSecret("SUPABASE_LICNENSE_SERVER_URL")
+        val localSigningKey = getSecret("LOCAL_SIGNING_KEY")
 
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
         buildConfigField("String", "UPSERT_ENDPOINT", "\"$upsertEndpoint\"")
+        buildConfigField("String", "DISTRIBUTION_LICENSE", "\"$licenseKey\"")
+        buildConfigField("String", "SUPABASE_LICNENSE_SERVER_URL", "\"$licenseServerUrl\"")
+        buildConfigField("String", "LICENSE_KEY", "\"$localSigningKey\"")
     }
 
     signingConfigs {
@@ -50,7 +56,7 @@ android {
             storeFile = file(keystorePath)
             storePassword = getSecret("KEYSTORE_PASSWORD")
             keyAlias = getSecret("KEY_ALIAS")
-            keyPassword = getSecret("KEY_PASSWORD", getSecret("KEYSTORE_PASSWORD"))
+            keyPassword = getSecret("KEYSTORE_PASSWORD")
         }
     }
 
@@ -102,5 +108,6 @@ kotlin {
 dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
-    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.appcompat:appcompat:1.6.1")    
+
 }
