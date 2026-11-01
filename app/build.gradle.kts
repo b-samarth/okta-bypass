@@ -32,19 +32,11 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        val supabaseUrl = getSecret("SUPABASE_URL")
-        val supabaseAnonKey = getSecret("SUPABASE_ANON_KEY")
-        val upsertEndpoint = getSecret("UPSERT_ENDPOINT")
-        val licenseKey = getSecret("DISTRIBUTION_LICENSE")
-        val licenseServerUrl = getSecret("SUPABASE_LICNENSE_SERVER_URL")
-        val localSigningKey = getSecret("LOCAL_SIGNING_KEY")
+        val redisPrimaryEndpoint = getSecret("REDIS_PRIMARY_ENDPOINT")
+        val redisPort = getSecret("REDIS_PORT")
 
-        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
-        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
-        buildConfigField("String", "UPSERT_ENDPOINT", "\"$upsertEndpoint\"")
-        buildConfigField("String", "DISTRIBUTION_LICENSE", "\"$licenseKey\"")
-        buildConfigField("String", "SUPABASE_LICNENSE_SERVER_URL", "\"$licenseServerUrl\"")
-        buildConfigField("String", "LICENSE_KEY", "\"$localSigningKey\"")
+        buildConfigField("String", "REDIS_PRIMARY_ENDPOINT", "\"$redisPrimaryEndpoint\"")
+        buildConfigField("String", "REDIS_PORT", "\"$redisPort\"")
     }
 
     signingConfigs {
@@ -108,6 +100,7 @@ kotlin {
 dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
-    implementation("androidx.appcompat:appcompat:1.6.1")    
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("redis.clients:jedis:5.2.0")
 
 }

