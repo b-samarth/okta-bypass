@@ -57,3 +57,21 @@
     public static void e(...);
     public static void wtf(...);
 }
+
+# Standard JVM / JMX classes missing on Android (Commons Pool 2)
+-dontwarn java.lang.management.**
+-dontwarn javax.management.**
+
+# Optional logging framework
+-dontwarn org.slf4j.**
+
+# Optional multi-cluster circuit breaker & retry libraries (Jedis)
+-dontwarn io.github.resilience4j.**
+
+# Optional bytecode proxy generation (Commons Pool 2)
+-dontwarn net.sf.cglib.**
+
+# Keep Jedis and object pooling runtime classes
+-keep class redis.clients.jedis.** { *; }
+-keep class org.apache.commons.pool2.** { *; }
+
