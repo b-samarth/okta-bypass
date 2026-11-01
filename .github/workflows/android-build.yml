@@ -43,6 +43,8 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEYSTORE_PATH: "app/release.jks"
+          REDIS_PRIMARY_ENDPOINT: ${{ secrets.REDIS_PRIMARY_ENDPOINT }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
         run: ./gradlew assembleRelease
 
       - name: Upload Release APK
